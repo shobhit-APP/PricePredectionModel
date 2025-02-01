@@ -30,9 +30,19 @@ model_path = os.path.join('Predict', 'model.pkl')
 xgb_model_path = os.path.join('Predict', 'cropPricePredictionModel.pkl')
 nn_model_path = os.path.join('Predict', 'nn_model.keras')
 
-# Fit MinMaxScaler with 6 features
-mx = MinMaxScaler()
+# Encode categorical columns using LabelEncoder
+label_encoders = {}
+categorical_columns = ['state', 'district', 'market', 'crop_name']
+
+for col in categorical_columns:
+    le = LabelEncoder()
+    df[col] = le.fit_transform(df[col])  # Encode categorical values
+    label_encoders[col] = le
+    pickle.dump(le, open(f'Predict/{col}_encoder.pkl', 'wb'))  # Save encoders for later use
+
+# Fit MinMaxScaler after encoding categorical columns
 X_features = df[['state', 'district', 'market', 'crop_name', 'min_price', 'max_price']]
+mx = MinMaxScaler()
 mx.fit(X_features)
 pickle.dump(mx, open(minmax_path, 'wb'))
 
@@ -49,20 +59,6 @@ with open(model_path, 'rb') as model_file:
 xgb_model = pickle.load(open(xgb_model_path, 'rb'))
 nn_model = load_model(nn_model_path)  # Load neural network model
 
-# Fit Label Encoders comprehensively
-def fit_label_encoders(df, column_name, additional_values=[]):
-    le = LabelEncoder()
-    unique_values = list(df[column_name].unique()) + additional_values
-    le.fit(unique_values)
-    df[column_name] = le.transform(df[column_name])
-    pickle.dump(le, open(f'{column_name}_encoder.pkl', 'wb'))
-    return le
-
-state_encoder = fit_label_encoders(df, 'state', ['Uttar Pradesh', 'Karnataka'])
-district_encoder = fit_label_encoders(df, 'district', ['Basti', 'Shimoga'])
-market_encoder = fit_label_encoders(df, 'market', ['Local Market', 'Shimoga Market'])
-crop_name_encoder = fit_label_encoders(df, 'crop_name', ['Wheat'])
-
 # Train the models (XGBoost and Neural Network)
 X = df[['state', 'district', 'market', 'crop_name','min_price', 'max_price']]
 y = df['suggested_price']
@@ -70,7 +66,7 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_
 
 xgb_model = xgb.XGBRegressor(n_estimators=100, learning_rate=0.1, max_depth=6)
 xgb_model.fit(X_train, y_train)
-pickle.dump(xgb_model, open('cropPricePredictionModel.pkl', 'wb'))
+pickle.dump(xgb_model, open(xgb_model_path, 'wb'))
 
 nn_model = Sequential([
     Dense(128, input_shape=(X_train.shape[1],), activation='relu'),
@@ -80,7 +76,7 @@ nn_model = Sequential([
 ])
 nn_model.compile(optimizer='adam', loss='mean_squared_error')
 nn_model.fit(X_train, y_train, epochs=20, batch_size=32, validation_data=(X_test, y_test))
-nn_model.save('nn_model.keras')  # Save model in Keras native format
+nn_model.save(nn_model_path)  # Save model in Keras native format
 
 @app.route('/')
 def home():
@@ -96,6 +92,7 @@ def predict():
         data = request.get_json()
         logging.info("Received Data: %s", data)  # Log received data
 
+        # Prepare new input data as DataFrame
         new_data = pd.DataFrame({
             'state': [data['state']],
             'district': [data['district']],
@@ -107,28 +104,22 @@ def predict():
 
         new_data['min_price'] = new_data['min_price'].astype(float)
         new_data['max_price'] = new_data['max_price'].astype(float)
-        logging.info("Data after initial processing: %s", new_data)  # Log processed data
+        logging.info("Data after initial processing: %s", new_data)
 
-        def encode_column(column_name, encoder):
-            try:
-                return encoder.transform(new_data[column_name])
-            except ValueError:
-                unique_values = list(encoder.classes_) + list(new_data[column_name].unique())
-                encoder.classes_ = np.array(unique_values)
-                return encoder.transform(new_data[column_name])
+        # Encode categorical columns using the pre-trained label encoders
+        new_data['state'] = label_encoders['state'].transform([data['state']])
+        new_data['district'] = label_encoders['district'].transform([data['district']])
+        new_data['market'] = label_encoders['market'].transform([data['market']])
+        new_data['crop_name'] = label_encoders['crop_name'].transform([data['crop_name']])
 
-        new_data['state'] = encode_column('state', state_encoder)
-        new_data['district'] = encode_column('district', district_encoder)
-        new_data['market'] = encode_column('market', market_encoder)
-        new_data['crop_name'] = encode_column('crop_name', crop_name_encoder)
-
-        logging.info("Data after encoding: %s", new_data)  # Log encoded data
+        logging.info("Data after encoding: %s", new_data)
 
         # Ensure the feature names are consistent with those used during fitting
         new_data_checked = check_array(new_data, dtype=np.float32, ensure_2d=True, allow_nd=False)
         new_data_scaled = mx.transform(new_data_checked)
         new_data_standardized = sc.transform(new_data_scaled)
 
+        # Predictions using XGBoost and Neural Network models
         predicted_price_xgb = xgb_model.predict(new_data_standardized)
         predicted_price_xgb = float(predicted_price_xgb[0])
         predicted_price_nn = nn_model.predict(new_data_standardized)
