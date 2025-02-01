@@ -36,11 +36,10 @@ def load_label_encoder(filename):
     with open(filename, 'rb') as file:
         return pickle.load(file)
 
-state_encoder = load_label_encoder('state_encoder.pkl')
-district_encoder = load_label_encoder('district_encoder.pkl')
-market_encoder = load_label_encoder('market_encoder.pkl')
-crop_name_encoder = load_label_encoder('crop_name_encoder.pkl')
-
+state_encoder = load_label_encoder(os.path.join('Predict', 'state_encoder.pkl'))
+district_encoder = load_label_encoder(os.path.join('Predict', 'district_encoder.pkl'))
+market_encoder = load_label_encoder(os.path.join('Predict', 'market_encoder.pkl'))
+crop_name_encoder = load_label_encoder(os.path.join('Predict', 'crop_name_encoder.pkl'))
 # ✅ Encoding Function
 def encode_column(data, column_name, encoder):
     try:
