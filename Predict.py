@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import pickle
 import numpy as np
@@ -8,14 +9,27 @@ from sklearn.preprocessing import LabelEncoder, MinMaxScaler
 
 app = Flask(__name__)
 
-# ✅ Load Pre-trained Models and Scalers
-with open('minmaxscaler.pkl', 'rb') as file:
-    scaler = pickle.load(file)
+# ✅ Define paths
+minmax_path = os.path.join('Predict', 'minmaxscaler.pkl')
+stand_path = os.path.join('Predict', 'standscaler.pkl')
+model_path = os.path.join('Predict', 'model.pkl')
+xgb_model_path = os.path.join('Predict', 'cropPricePredictionModel.pkl')
+nn_model_path = os.path.join('Predict', 'nn_model.keras')
 
-with open('cropPricePredictionModel.pkl', 'rb') as model_file:
-    xgb_model = pickle.load(model_file)
+# ✅ Load Pretrained Models & Scalers
+with open(minmax_path, 'rb') as minmax_file:
+    mx = pickle.load(minmax_file)  # MinMaxScaler
 
-nn_model = load_model('nn_model.keras')
+with open(stand_path, 'rb') as stand_file:
+    sc = pickle.load(stand_file)  # StandardScaler
+
+with open(model_path, 'rb') as model_file:
+    randclf = pickle.load(model_file)  # Random Forest Model (Unused in this script)
+
+with open(xgb_model_path, 'rb') as xgb_file:
+    xgb_model = pickle.load(xgb_file)  # XGBoost Model
+
+nn_model = load_model(nn_model_path)  # Neural Network Model
 
 # ✅ Load Label Encoders
 def load_label_encoder(filename):
@@ -27,7 +41,7 @@ district_encoder = load_label_encoder('district_encoder.pkl')
 market_encoder = load_label_encoder('market_encoder.pkl')
 crop_name_encoder = load_label_encoder('crop_name_encoder.pkl')
 
-# ✅ Handle Encoding of Input Data
+# ✅ Encoding Function
 def encode_column(data, column_name, encoder):
     try:
         return encoder.transform([data[column_name]])[0]
@@ -36,7 +50,7 @@ def encode_column(data, column_name, encoder):
         encoder.classes_ = np.array(unique_values)
         return encoder.transform([data[column_name]])[0]
 
-# ✅ Price Prediction Endpoint
+# ✅ Prediction Endpoint
 @app.route('/predict', methods=['POST'])
 def predict():
     data = request.get_json()
@@ -52,8 +66,8 @@ def predict():
             'max_price': [float(data['max_price'])]
         })
 
-        # Scale input data
-        new_data_scaled = scaler.transform(new_data)
+        # Use MinMaxScaler to scale the data
+        new_data_scaled = mx.transform(new_data)
 
         # Predict using XGBoost and Neural Network
         predicted_price_xgb = float(xgb_model.predict(new_data_scaled)[0])
