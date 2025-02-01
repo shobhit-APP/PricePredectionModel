@@ -128,8 +128,8 @@ def predict():
 
         logging.info("Data after encoding: %s", new_data)
 
-        # Ensure the feature names are consistent with those used during fitting
-        new_data_checked = check_array(new_data, dtype=np.float32, ensure_2d=True, allow_nd=False)
+        # Ensure the features are passed as numpy arrays (this resolves the warning about feature names)
+        new_data_checked = check_array(new_data[['state', 'district', 'market', 'crop_name', 'min_price', 'max_price']].values, dtype=np.float32, ensure_2d=True, allow_nd=False)
         new_data_scaled = mx.transform(new_data_checked)
         new_data_standardized = sc.transform(new_data_scaled)
 
