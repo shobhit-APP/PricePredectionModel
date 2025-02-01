@@ -1,7 +1,7 @@
 import pandas as pd
 import pickle
 import numpy as np
-from sklearn.preprocessing import LabelEncoder, MinMaxScaler
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler, StandardScaler
 import xgboost as xgb
 from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import Dense
@@ -43,6 +43,11 @@ X_features = df[['state', 'district', 'market', 'crop_name', 'min_price', 'max_p
 mx = MinMaxScaler()
 mx.fit(X_features)
 pickle.dump(mx, open(minmax_path, 'wb'))
+
+# Fit StandardScaler with only the 6 features (state, district, market, crop_name, min_price, max_price)
+sc = StandardScaler()
+sc.fit(X_features)  # Fit using the 6 features
+pickle.dump(sc, open(stand_path, 'wb'))
 
 # Load Pretrained Models & Scalers
 with open(minmax_path, 'rb') as minmax_file:
