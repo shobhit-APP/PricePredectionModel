@@ -1,4 +1,4 @@
-]import pandas as pd
+import pandas as pd
 import pickle
 import numpy as np
 from sklearn.preprocessing import LabelEncoder, MinMaxScaler
