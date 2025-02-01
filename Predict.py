@@ -7,12 +7,10 @@ from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import Dense
 from sklearn.model_selection import train_test_split
 from flask import Flask, request, jsonify
-from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import RandomForestClassifier
-import logging
-import os
 from sklearn.utils.validation import check_array
 from memory_profiler import profile
+import logging
+import os
 import gc
 
 app = Flask(__name__)
@@ -85,6 +83,17 @@ def home():
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 
+# Helper function to handle unseen labels
+def encode_column_with_new_labels(column_name, encoder, new_data):
+    try:
+        return encoder.transform(new_data[column_name])
+    except ValueError:
+        # Handle unseen labels: add the new labels to the encoder and retrain it
+        unique_values = list(encoder.classes_) + list(new_data[column_name].unique())
+        encoder.classes_ = np.array(unique_values)
+        pickle.dump(encoder, open(f'Predict/{column_name}_encoder.pkl', 'wb'))  # Save updated encoder
+        return encoder.transform(new_data[column_name])
+
 @app.route('/predict', methods=['POST'])
 @profile
 def predict():
@@ -106,11 +115,11 @@ def predict():
         new_data['max_price'] = new_data['max_price'].astype(float)
         logging.info("Data after initial processing: %s", new_data)
 
-        # Encode categorical columns using the pre-trained label encoders
-        new_data['state'] = label_encoders['state'].transform([data['state']])
-        new_data['district'] = label_encoders['district'].transform([data['district']])
-        new_data['market'] = label_encoders['market'].transform([data['market']])
-        new_data['crop_name'] = label_encoders['crop_name'].transform([data['crop_name']])
+        # Encode categorical columns using the pre-trained label encoders (or update them)
+        new_data['state'] = encode_column_with_new_labels('state', label_encoders['state'], new_data)
+        new_data['district'] = encode_column_with_new_labels('district', label_encoders['district'], new_data)
+        new_data['market'] = encode_column_with_new_labels('market', label_encoders['market'], new_data)
+        new_data['crop_name'] = encode_column_with_new_labels('crop_name', label_encoders['crop_name'], new_data)
 
         logging.info("Data after encoding: %s", new_data)
 
