@@ -1,12 +1,13 @@
-import pandas as pd
+]import pandas as pd
 import pickle
 import numpy as np
-from sklearn.preprocessing import LabelEncoder, MinMaxScaler, StandardScaler
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler
 import xgboost as xgb
 from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import Dense
 from sklearn.model_selection import train_test_split
 from flask import Flask, request, jsonify
+from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
 import logging
 import os
@@ -29,12 +30,16 @@ model_path = os.path.join('Predict', 'model.pkl')
 xgb_model_path = os.path.join('Predict', 'cropPricePredictionModel.pkl')
 nn_model_path = os.path.join('Predict', 'nn_model.keras')
 
-# Retrain MinMaxScaler
+# Fit MinMaxScaler with 6 features
 mx = MinMaxScaler()
-df_scaled = mx.fit_transform(df[['min_price', 'max_price', 'suggested_price']])
-pickle.dump(mx, open(minmax_path, 'wb'))  # Save updated MinMaxScaler
+X_features = df[['state', 'district', 'market', 'crop_name', 'min_price', 'max_price']]
+mx.fit(X_features)
+pickle.dump(mx, open(minmax_path, 'wb'))
 
-# Load StandardScaler
+# Load Pretrained Models & Scalers
+with open(minmax_path, 'rb') as minmax_file:
+    mx = pickle.load(minmax_file)
+
 with open(stand_path, 'rb') as stand_file:
     sc = pickle.load(stand_file)
 
@@ -59,7 +64,7 @@ market_encoder = fit_label_encoders(df, 'market', ['Local Market', 'Shimoga Mark
 crop_name_encoder = fit_label_encoders(df, 'crop_name', ['Wheat'])
 
 # Train the models (XGBoost and Neural Network)
-X = df[['state', 'district', 'market', 'crop_name','min_price', 'max_price','arrivalDate']]  
+X = df[['state', 'district', 'market', 'crop_name','min_price', 'max_price']]
 y = df['suggested_price']
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
