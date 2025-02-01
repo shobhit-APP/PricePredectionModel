@@ -1,13 +1,12 @@
 import pandas as pd
 import pickle
 import numpy as np
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler, StandardScaler
 import xgboost as xgb
 from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import Dense
 from sklearn.model_selection import train_test_split
 from flask import Flask, request, jsonify
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.ensemble import RandomForestClassifier
 import logging
 import os
@@ -18,22 +17,24 @@ import gc
 app = Flask(__name__)
 
 # Adjust the path according to the actual location of Cropprice.csv
-file_path = os.path.join('Model', 'Cropprice.csv')
+file_path = os.path.join('Predict', 'Cropprice.csv')
 df = pd.read_csv(file_path)
 
 df.ffill(inplace=True)  # Handle missing values
 
 # Adjust paths according to your project structure
-minmax_path = os.path.join('Model', 'minmaxscaler.pkl')
-stand_path = os.path.join('Model', 'standscaler.pkl')
-model_path = os.path.join('Model', 'model.pkl')
-xgb_model_path = os.path.join('Model', 'cropPricePredictionModel.pkl')
-nn_model_path = os.path.join('Model', 'nn_model.keras')
+minmax_path = os.path.join('Predict', 'minmaxscaler.pkl')
+stand_path = os.path.join('Predict', 'standscaler.pkl')
+model_path = os.path.join('Predict', 'model.pkl')
+xgb_model_path = os.path.join('Predict', 'cropPricePredictionModel.pkl')
+nn_model_path = os.path.join('Predict', 'nn_model.keras')
 
-# Load Pretrained Models & Scalers
-with open(minmax_path, 'rb') as minmax_file:
-    mx = pickle.load(minmax_file)
+# Retrain MinMaxScaler
+mx = MinMaxScaler()
+df_scaled = mx.fit_transform(df[['min_price', 'max_price', 'suggested_price']])
+pickle.dump(mx, open(minmax_path, 'wb'))  # Save updated MinMaxScaler
 
+# Load StandardScaler
 with open(stand_path, 'rb') as stand_file:
     sc = pickle.load(stand_file)
 
@@ -42,8 +43,6 @@ with open(model_path, 'rb') as model_file:
 
 xgb_model = pickle.load(open(xgb_model_path, 'rb'))
 nn_model = load_model(nn_model_path)  # Load neural network model
-
-
 
 # Fit Label Encoders comprehensively
 def fit_label_encoders(df, column_name, additional_values=[]):
