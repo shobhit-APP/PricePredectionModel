@@ -1,159 +1,310 @@
+
 import pandas as pd
 import pickle
 import numpy as np
 from sklearn.preprocessing import LabelEncoder, MinMaxScaler, StandardScaler
 import xgboost as xgb
 from tensorflow.keras.models import Sequential, load_model
-from tensorflow.keras.layers import Dense
+from tensorflow.keras.layers import Dense, Dropout
 from sklearn.model_selection import train_test_split
 from flask import Flask, request, jsonify
-from sklearn.utils.validation import check_array
 from memory_profiler import profile
 import logging
 import os
 import gc
+from sklearn.metrics import mean_squared_error, r2_score
+from tensorflow.keras.callbacks import EarlyStopping
 
 app = Flask(__name__)
 
-# Adjust the path according to the actual location of Cropprice.csv
-file_path = os.path.join('Predict', 'Cropprice.csv')
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Path configuration
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, 'Predict')
+MODEL_DIR = os.path.join(BASE_DIR, 'Models')
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(MODEL_DIR, exist_ok=True)
+
+# File paths
+file_path = os.path.join(DATA_DIR, 'Cropprice.csv')
+price_minmax_path = os.path.join(MODEL_DIR, 'price_minmax_scaler.pkl')
+price_stand_path = os.path.join(MODEL_DIR, 'price_standard_scaler.pkl')
+xgb_model_path = os.path.join(MODEL_DIR, 'xgb_price_model.pkl')
+nn_model_path = os.path.join(MODEL_DIR, 'nn_price_model.keras')
+
+# Check if the dataset exists
+if not os.path.exists(file_path):
+    alt_file_path = os.path.join(BASE_DIR, 'Cropprice.csv')
+    if os.path.exists(alt_file_path):
+        file_path = alt_file_path
+        logger.info(f"Using alternate file path: {file_path}")
+    else:
+        logger.error("Cropprice.csv not found in either location")
+        raise FileNotFoundError("Cropprice.csv not found")
+
+logger.info(f"Loading dataset from: {file_path}")
 df = pd.read_csv(file_path)
 
-df.ffill(inplace=True)  # Handle missing values
+# Handle missing values more robustly
+logger.info("Handling missing values")
+df = df.ffill().bfill()  # Using new syntax instead of deprecated fillna(method='ffill')
 
-# Adjust paths according to your project structure
-minmax_path = os.path.join('Predict', 'minmaxscaler.pkl')
-stand_path = os.path.join('Predict', 'standscaler.pkl')
-model_path = os.path.join('Predict', 'model.pkl')
-xgb_model_path = os.path.join('Predict', 'cropPricePredictionModel.pkl')
-nn_model_path = os.path.join('Predict', 'nn_model.keras')
+# Check for and handle outliers in price columns
+def remove_outliers(df, columns):
+    df_cleaned = df.copy()
+    for col in columns:
+        if col in df.columns:
+            Q1 = df[col].quantile(0.25)
+            Q3 = df[col].quantile(0.75)
+            IQR = Q3 - Q1
+            lower_bound = Q1 - 1.5 * IQR
+            upper_bound = Q3 + 1.5 * IQR
+            df_cleaned = df_cleaned[(df_cleaned[col] >= lower_bound) & (df_cleaned[col] <= upper_bound)]
+            logger.info(f"Removed outliers from {col}: {len(df) - len(df_cleaned)} rows")
+    return df_cleaned
 
-# Encode categorical columns using LabelEncoder
+price_columns = ['min_price', 'max_price', 'suggested_price']
+price_columns_present = [col for col in price_columns if col in df.columns]
+if price_columns_present:
+    df = remove_outliers(df, price_columns_present)
+
+# Encode categorical columns and save encoders
 label_encoders = {}
 categorical_columns = ['state', 'district', 'market', 'crop_name']
 
 for col in categorical_columns:
-    le = LabelEncoder()
-    df[col] = le.fit_transform(df[col])  # Encode categorical values
-    label_encoders[col] = le
-    pickle.dump(le, open(f'Predict/{col}_encoder.pkl', 'wb'))  # Save encoders for later use
+    if col in df.columns:
+        le = LabelEncoder()
+        df[col] = le.fit_transform(df[col])
+        label_encoders[col] = le
+        encoder_path = os.path.join(MODEL_DIR, f'{col}_encoder.pkl')
+        with open(encoder_path, 'wb') as f:
+            pickle.dump(le, f)
+        logger.info(f"Saved encoder for {col} at {encoder_path}")
 
-# Fit MinMaxScaler after encoding categorical columns
-X_features = df[['state', 'district', 'market', 'crop_name', 'min_price', 'max_price']]
-mx = MinMaxScaler()
-mx.fit(X_features)
-pickle.dump(mx, open(minmax_path, 'wb'))
+# Create price prediction models if target exists
+price_target_col = None
+for col in ['suggested_price', 'modal_price']:
+    if col in df.columns:
+        price_target_col = col
+        break
 
-# Fit StandardScaler with only the 6 features (state, district, market, crop_name, min_price, max_price)
-sc = StandardScaler()
-sc.fit(X_features)  # Fit using the 6 features
-pickle.dump(sc, open(stand_path, 'wb'))
+if price_target_col:
+    logger.info(f"Training price prediction models using target: {price_target_col}")
+    
+    # Select relevant features for price prediction
+    feature_cols = [col for col in categorical_columns if col in df.columns]
+    
+    # Add price features if they exist
+    if 'min_price' in df.columns:
+        feature_cols.append('min_price')
+    if 'max_price' in df.columns:
+        feature_cols.append('max_price')
+    
+    X_price = df[feature_cols]
+    y_price = df[price_target_col]
+    
+    # Print some statistics about the price data
+    logger.info(f"Price statistics - Min: {y_price.min()}, Max: {y_price.max()}, Mean: {y_price.mean()}, Median: {y_price.median()}")
+    
+    # Fit MinMaxScaler and StandardScaler for price prediction
+    mx_price = MinMaxScaler()
+    X_price_scaled = mx_price.fit_transform(X_price)
+    
+    sc_price = StandardScaler()
+    X_price_standardized = sc_price.fit_transform(X_price_scaled)  # Fixed from .transform to .fit_transform
+    
+    # Train test split
+    X_train, X_test, y_train, y_test = train_test_split(X_price_standardized, y_price, test_size=0.2, random_state=42)
+    
+    # Train XGBoost model
+    xgb_model = xgb.XGBRegressor(n_estimators=100, learning_rate=0.1, max_depth=6, random_state=42)
+    xgb_model.fit(X_train, y_train)
+    
+    # Evaluate XGBoost model
+    xgb_pred = xgb_model.predict(X_test)
+    xgb_mse = mean_squared_error(y_test, xgb_pred)
+    xgb_r2 = r2_score(y_test, xgb_pred)
+    logger.info(f"XGBoost MSE: {xgb_mse}, R2: {xgb_r2}")
+    
+    # Save XGBoost model
+    with open(xgb_model_path, 'wb') as f:
+        pickle.dump(xgb_model, f)
+    
+    # Train Neural Network model with improved architecture
+    nn_model = Sequential([
+        Dense(128, input_shape=(X_train.shape[1],), activation='relu'),
+        Dropout(0.3),
+        Dense(64, activation='relu'),
+        Dropout(0.2),
+        Dense(32, activation='relu'),
+        Dense(1)  # Output layer for regression
+    ])
+    
+    nn_model.compile(optimizer='adam', loss='mean_squared_error', metrics=['mse', 'mae'])
+    
+    # Early stopping to prevent overfitting
+    early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+    
+    nn_history = nn_model.fit(
+        X_train, y_train,
+        epochs=100,
+        batch_size=32,
+        validation_data=(X_test, y_test),
+        callbacks=[early_stopping],
+        verbose=1
+    )
+    
+    # Evaluate Neural Network model
+    nn_pred = nn_model.predict(X_test)
+    nn_mse = mean_squared_error(y_test, nn_pred)
+    nn_r2 = r2_score(y_test, nn_pred.flatten())
+    logger.info(f"Neural Network MSE: {nn_mse}, R2: {nn_r2}")
+    
+    # Save Neural Network model
+    nn_model.save(nn_model_path)
+    
+    # Save price scalers
+    with open(price_minmax_path, 'wb') as f:
+        pickle.dump(mx_price, f)
+    
+    with open(price_stand_path, 'wb') as f:
+        pickle.dump(sc_price, f)
+    
+    logger.info("Price prediction models saved")
+else:
+    logger.warning("Price prediction target column not found in dataset")
 
-# Load Pretrained Models & Scalers
-with open(minmax_path, 'rb') as minmax_file:
-    mx = pickle.load(minmax_file)
+# Load price models and scalers
+def load_price_models():
+    try:
+        with open(price_minmax_path, 'rb') as f:
+            mx_price = pickle.load(f)
+        
+        with open(price_stand_path, 'rb') as f:
+            sc_price = pickle.load(f)
+        
+        with open(xgb_model_path, 'rb') as f:
+            xgb_model = pickle.load(f)
+        
+        nn_model = load_model(nn_model_path)
+        
+        return mx_price, sc_price, xgb_model, nn_model
+    except Exception as e:
+        logger.error(f"Error loading price models: {str(e)}")
+        return None, None, None, None
 
-with open(stand_path, 'rb') as stand_file:
-    sc = pickle.load(stand_file)
+def load_encoders():
+    encoders = {}
+    for col in categorical_columns:
+        encoder_path = os.path.join(MODEL_DIR, f'{col}_encoder.pkl')
+        try:
+            with open(encoder_path, 'rb') as f:
+                encoders[col] = pickle.load(f)
+        except Exception as e:
+            logger.warning(f"Could not load encoder for {col}: {str(e)}")
+    return encoders
 
-with open(model_path, 'rb') as model_file:
-    randclf = pickle.load(model_file)
+# Helper function to handle unseen labels safely
+def encode_column_safely(column_name, encoder, value):
+    try:
+        return encoder.transform([value])[0]
+    except ValueError:
+        # For unseen values, return a default value
+        logger.warning(f"Unseen value in {column_name}: {value}")
+        return 0  # Default to first class
 
-xgb_model = pickle.load(open(xgb_model_path, 'rb'))
-nn_model = load_model(nn_model_path)  # Load neural network model
-
-# Train the models (XGBoost and Neural Network)
-X = df[['state', 'district', 'market', 'crop_name','min_price', 'max_price']]
-y = df['suggested_price']
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-xgb_model = xgb.XGBRegressor(n_estimators=100, learning_rate=0.1, max_depth=6)
-xgb_model.fit(X_train, y_train)
-pickle.dump(xgb_model, open(xgb_model_path, 'wb'))
-
-nn_model = Sequential([
-    Dense(128, input_shape=(X_train.shape[1],), activation='relu'),
-    Dense(64, activation='relu'),
-    Dense(32, activation='relu'),
-    Dense(1)  # Output layer for regression
-])
-nn_model.compile(optimizer='adam', loss='mean_squared_error')
-nn_model.fit(X_train, y_train, epochs=20, batch_size=32, validation_data=(X_test, y_test))
-nn_model.save(nn_model_path)  # Save model in Keras native format
+# Ensure reasonable price predictions
+def validate_price(predicted_price, min_price, max_price):
+    if predicted_price < 0:
+        return max(0, min_price * 0.8)  # Floor at 0 or 80% of min_price
+    if predicted_price > max_price * 2:
+        return max_price * 1.2  # Cap at 120% of max_price
+    return predicted_price
 
 @app.route('/')
 def home():
-    return "Welcome to the Crop Recommendation API!"
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-
-# Helper function to handle unseen labels
-def encode_column_with_new_labels(column_name, encoder, new_data):
-    try:
-        return encoder.transform(new_data[column_name])
-    except ValueError:
-        # Handle unseen labels: add the new labels to the encoder and retrain it
-        unique_values = list(encoder.classes_) + list(new_data[column_name].unique())
-        encoder.classes_ = np.array(unique_values)
-        pickle.dump(encoder, open(f'Predict/{column_name}_encoder.pkl', 'wb'))  # Save updated encoder
-        return encoder.transform(new_data[column_name])
+    return "Welcome to the Crop Price Prediction API!"
 
 @app.route('/predict', methods=['POST'])
 @profile
 def predict():
     try:
         data = request.get_json()
-        logging.info("Received Data: %s", data)  # Log received data
+        logger.info(f"Received data: {data}")
 
-        # Prepare new input data as DataFrame
-        new_data = pd.DataFrame({
-            'state': [data['state']],
-            'district': [data['district']],
-            'market': [data['market']],
-            'crop_name': [data['crop_name']],
-            'min_price': [data['min_price']],
-            'max_price': [data['max_price']]
-        })
+        # Load models and encoders
+        mx_price, sc_price, xgb_model, nn_model = load_price_models()
+        if not all([mx_price, sc_price, xgb_model, nn_model]):
+            return jsonify({'error': 'Models not available'}), 500
+        
+        encoders = load_encoders()
+        if not encoders:
+            return jsonify({'error': 'Encoders not available'}), 500
 
-        new_data['min_price'] = new_data['min_price'].astype(float)
-        new_data['max_price'] = new_data['max_price'].astype(float)
-        logging.info("Data after initial processing: %s", new_data)
-
-        # Encode categorical columns using the pre-trained label encoders (or update them)
-        new_data['state'] = encode_column_with_new_labels('state', label_encoders['state'], new_data)
-        new_data['district'] = encode_column_with_new_labels('district', label_encoders['district'], new_data)
-        new_data['market'] = encode_column_with_new_labels('market', label_encoders['market'], new_data)
-        new_data['crop_name'] = encode_column_with_new_labels('crop_name', label_encoders['crop_name'], new_data)
-
-        logging.info("Data after encoding: %s", new_data)
-
-        # Ensure the features are passed as numpy arrays (this resolves the warning about feature names)
-        new_data_checked = check_array(new_data[['state', 'district', 'market', 'crop_name', 'min_price', 'max_price']].values, dtype=np.float32, ensure_2d=True, allow_nd=False)
-        new_data_scaled = mx.transform(new_data_checked)
-        new_data_standardized = sc.transform(new_data_scaled)
-
-        # Predictions using XGBoost and Neural Network models
-        predicted_price_xgb = xgb_model.predict(new_data_standardized)
-        predicted_price_xgb = float(predicted_price_xgb[0])
-        predicted_price_nn = nn_model.predict(new_data_standardized)
-        predicted_price_nn = float(predicted_price_nn[0][0])
-
-        # Run garbage collection to free up memory
+        # Encode categorical values
+        encoded_data = {}
+        for col in categorical_columns:
+            if col in data:
+                if col in encoders:
+                    encoded_data[col] = encode_column_safely(col, encoders[col], data[col])
+                else:
+                    return jsonify({'error': f'Encoder for {col} not available'}), 500
+        
+        # Add numerical values
+        min_price = float(data.get('min_price', 0))
+        max_price = float(data.get('max_price', 0))
+        encoded_data['min_price'] = min_price
+        encoded_data['max_price'] = max_price
+        
+        # Create input array
+        input_array = np.array([[
+            encoded_data.get('state', 0),
+            encoded_data.get('district', 0),
+            encoded_data.get('market', 0),
+            encoded_data.get('crop_name', 0),
+            encoded_data.get('min_price', 0),
+            encoded_data.get('max_price', 0)
+        ]])
+        
+        # Scale input data
+        input_scaled = mx_price.transform(input_array)
+        input_standardized = sc_price.transform(input_scaled)
+        
+        # Make predictions
+        xgb_pred = float(xgb_model.predict(input_standardized)[0])
+        nn_pred = float(nn_model.predict(input_standardized)[0][0])
+        
+        # Validate predictions
+        xgb_pred = validate_price(xgb_pred, min_price, max_price)
+        nn_pred = validate_price(nn_pred, min_price, max_price)
+        
+        # Calculate ensemble prediction (average of both models)
+        ensemble_pred = (xgb_pred + nn_pred) / 2
+        
+        # Clean up memory
         gc.collect()
-
-        return jsonify({
-            'predicted_price_xgb': predicted_price_xgb,
-            'predicted_price_nn': predicted_price_nn
-        })
-    except ValueError as ve:
-        logging.error("ValueError: %s", str(ve))  # Log specific error
-        return jsonify({'error': f'ValueError: %s' % str(ve)}), 400
+        
+        # Return all predictions
+        result = {
+            'predicted_price_xgb': round(xgb_pred, 2),
+            'predicted_price_nn': round(nn_pred, 2),
+            'predicted_price_ensemble': round(ensemble_pred, 2),
+            'min_input_price': min_price,
+            'max_input_price': max_price
+        }
+        
+        logger.info(f"Prediction result: {result}")
+        return jsonify(result)
+        
     except Exception as e:
-        logging.error("Unexpected error: %s", str(e))  # Log unexpected error
-        return jsonify({'error': f'Unexpected error: %s' % str(e)}), 500
+        logger.error(f"Error in predict endpoint: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))  # Get PORT from Render, default to 5000
-    logging.info("Running on port: %d", port)  # Debug statement
-    app.run(host="0.0.0.0", port=port)
+    port = int(os.environ.get("PORT", 5000))
+    logger.info(f"Starting server on port {port}")
+    app.run(host="0.0.0.0", port=port, debug=True)
