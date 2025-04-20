@@ -23,10 +23,8 @@ logger = logging.getLogger(__name__)
 
 # Path configuration
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, 'Predict')
-MODEL_DIR = os.path.join(BASE_DIR, 'Models')
-os.makedirs(DATA_DIR, exist_ok=True)
-os.makedirs(MODEL_DIR, exist_ok=True)
+DATA_DIR = BASE_DIR  # CSV file is in the same directory as the script
+MODEL_DIR = BASE_DIR  # Model files are also in the same directory
 
 # File paths
 file_path = os.path.join(DATA_DIR, 'Cropprice.csv')
