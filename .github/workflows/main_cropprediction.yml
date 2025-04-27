@@ -1,4 +1,4 @@
-name: Build and deploy CropPrediction ML model to DigitalOcean Droplet
+name: Build and deploy CropPrediction ML models to DigitalOcean Droplet
 
 on:
   push:
