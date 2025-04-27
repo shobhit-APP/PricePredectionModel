@@ -1,4 +1,4 @@
-name: Build and deploy ML model to DigitalOcean Droplet
+name: Build and deploy CropPrediction ML model to DigitalOcean Droplet
 
 on:
   push:
@@ -28,19 +28,14 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Train ML model (example)
-        run: |
-          python train_model.py  # Replace with your training script
-          # Assuming model is saved as model.pkl
-          ls -la model.pkl || echo "Model training failed or file not found"
-
       - name: Zip artifact for deployment
-        run: zip release.zip model.pkl inference.py requirements.txt -r
+        run: |
+          zip -r release.zip Models/ predict.py requirements.txt
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
-          name: ml-model
+          name: crop-prediction-app
           path: release.zip
           if-no-files-found: warn
 
@@ -54,7 +49,7 @@ jobs:
       - name: Download artifact from build job
         uses: actions/download-artifact@v4
         with:
-          name: ml-model
+          name: crop-prediction-app
 
       - name: Unzip artifact for deployment
         run: unzip release.zip
@@ -65,20 +60,20 @@ jobs:
           host: 139.59.10.226
           username: root
           password: ${{ secrets.DROPLET_PASSWORD }}
-          source: "model.pkl, inference.py, requirements.py"
-          target: "/root/ml-app/"
+          source: "Models/,predict.py,requirements.txt"
+          target: "/root/crop-prediction/"
 
-      - name: Start ML inference service
+      - name: Start prediction service
         uses: appleboy/ssh-action@master
         with:
           host: 139.59.10.226
           username: root
           password: ${{ secrets.DROPLET_PASSWORD }}
           script: |
-            cd /root/ml-app
-            # Install dependencies if needed
+            cd /root/crop-prediction
+            # Install dependencies
             pip install -r requirements.txt || echo "Dependencies already installed"
             # Kill existing process if running
-            pkill -f 'python inference.py' || true
-            # Start inference script with nohup
-            nohup python inference.py > app.log 2>&1 &
+            pkill -f 'python predict.py' || true
+            # Start prediction script with nohup
+            nohup python predict.py > app.log 2>&1 &
