@@ -30,7 +30,7 @@ jobs:
 
       - name: Zip artifact for deployment
         run: |
-          zip -r release.zip Models/ predict.py requirements.txt
+          zip -r release.zip Models/ Predict/ predict.py requirements.txt
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
@@ -60,7 +60,7 @@ jobs:
           host: 159.65.158.161
           username: root
           password: ${{ secrets.DROPLET_PASSWORD }}
-          source: "Models/,predict.py,requirements.txt"
+          source: "Models/,Predict/,predict.py,requirements.txt"
           target: "/root/crop-prediction/"
 
       - name: Start prediction service
