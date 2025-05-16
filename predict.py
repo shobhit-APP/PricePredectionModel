@@ -29,7 +29,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 # File paths
-CSV_PATH = '/root/crop-prediction/Predict/Cropprice.csv'
+CSV_PATH = '/root/crop-prediction/Cropprice.csv'
 price_minmax_path = os.path.join(MODEL_DIR, 'price_minmax_scaler.pkl')
 price_stand_path = os.path.join(MODEL_DIR, 'price_standard_scaler.pkl')
 xgb_model_path = os.path.join(MODEL_DIR, 'xgb_price_model.pkl')
