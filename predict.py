@@ -35,22 +35,39 @@ MODEL_DIR = os.path.join(BASE_DIR, 'Models')
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(MODEL_DIR, exist_ok=True)
 
-# File paths
-file_path = os.path.join(DATA_DIR, 'Cropprice.csv')
+# Debug path information
+logger.info(f"BASE_DIR: {BASE_DIR}")
+logger.info(f"DATA_DIR: {DATA_DIR}")
+
+# File paths to try (in order of preference)
+file_paths_to_try = [
+    os.path.join(DATA_DIR, 'Cropprice.csv'),
+    os.path.join(BASE_DIR, 'Cropprice.csv'),
+    os.path.join(BASE_DIR, 'Predict', 'Cropprice.csv'),
+    '/root/crop-prediction/Predict/Cropprice.csv',
+    './Predict/Cropprice.csv',
+    './Cropprice.csv'
+]
+
+# Try each path until we find the file
+file_path = None
+for path in file_paths_to_try:
+    logger.info(f"Trying path: {path}")
+    if os.path.exists(path):
+        file_path = path
+        logger.info(f"Found CSV at: {file_path}")
+        break
+
+# Exit if file not found
+if file_path is None:
+    logger.error(f"Cropprice.csv not found in any of these locations: {file_paths_to_try}")
+    raise FileNotFoundError("Cropprice.csv not found")
+
+# Define other file paths
 price_minmax_path = os.path.join(MODEL_DIR, 'price_minmax_scaler.pkl')
 price_stand_path = os.path.join(MODEL_DIR, 'price_standard_scaler.pkl')
 xgb_model_path = os.path.join(MODEL_DIR, 'xgb_price_model.pkl')
 nn_model_path = os.path.join(MODEL_DIR, 'nn_price_model.keras')
-
-# Alternate file path if not found
-if not os.path.exists(file_path):
-    alt_file_path = os.path.join(BASE_DIR, 'Cropprice.csv')
-    if os.path.exists(alt_file_path):
-        file_path = alt_file_path
-        logger.info(f"Using alternate file path: {file_path}")
-    else:
-        logger.error("Cropprice.csv not found in either location")
-        raise FileNotFoundError("Cropprice.csv not found")
 
 logger.info(f"Loading dataset from: {file_path}")
 df = pd.read_csv(file_path)
