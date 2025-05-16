@@ -130,7 +130,7 @@ jobs:
             Restart=always
             StandardOutput=append:/root/crop-prediction/app.log
             StandardError=append:/root/crop-prediction/app.log
-            MemoryLimit=700M
+            MemoryMax=2500M
 
             [Install]
             WantedBy=multi-user.target
@@ -141,7 +141,24 @@ jobs:
             systemctl enable crop-prediction.service
             systemctl restart crop-prediction.service
 
-            sleep 15
+            echo "Waiting for Flask app to start (up to 5 minutes)..."
+            for i in {1..30}; do
+              if curl --fail --silent --show-error http://localhost:5000/; then
+                echo "Flask app is responding"
+                break
+              fi
+              echo "Attempt $i/30: Flask app not yet responding, waiting 10 seconds..."
+              sleep 10
+              if [ $i -eq 30 ]; then
+                echo "Flask app failed to start within 5 minutes"
+                systemctl status crop-prediction.service
+                journalctl -u crop-prediction.service -n 50
+                cat app.log
+                free -m
+                exit 1
+              fi
+            done
+
             if systemctl is-active --quiet crop-prediction.service; then
               echo "Flask app started successfully via systemd"
             else
@@ -152,11 +169,3 @@ jobs:
               free -m
               exit 1
             fi
-
-            curl --fail --silent --show-error http://localhost:5000/ || {
-              echo "Flask app is not responding"
-              cat app.log
-              journalctl -u crop-prediction.service -n 50
-              free -m
-              exit 1
-            }
