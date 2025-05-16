@@ -10,7 +10,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read  # Required for actions/checkout
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -24,7 +24,7 @@ jobs:
         run: |
           python -m venv venv
           source venv/bin/activate
-          python --version  # Debug: Confirm Python version
+          python --version
 
       - name: Install dependencies
         run: |
@@ -34,14 +34,14 @@ jobs:
       - name: Zip artifact for deployment
         run: |
           zip -r release.zip Models/ Cropprice.csv predict.py requirements.txt
-          ls -l release.zip  # Debug: Confirm zip file creation
+          ls -l release.zip
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
           name: crop-prediction-app
           path: release.zip
-          if-no-files-found: error  # Fail if zip file is missing
+          if-no-files-found: error
 
   deploy:
     runs-on: ubuntu-latest
@@ -58,7 +58,7 @@ jobs:
       - name: Unzip artifact for deployment
         run: |
           unzip release.zip
-          ls -l  # Debug: Confirm unzipped files
+          ls -l
 
       - name: Deploy to DigitalOcean
         uses: appleboy/scp-action@v0.1.5
@@ -68,7 +68,7 @@ jobs:
           password: ${{ secrets.DROPLET_PASSWORD }}
           source: "Models/,Cropprice.csv,predict.py,requirements.txt"
           target: "/root/crop-prediction/"
-          strip_components: 0  # Ensure files are copied directly to target
+          strip_components: 0
 
       - name: Start prediction service
         uses: appleboy/ssh-action@v0.1.6
@@ -77,37 +77,69 @@ jobs:
           username: root
           password: ${{ secrets.DROPLET_PASSWORD }}
           script: |
+            set -e
+
             cd /root/crop-prediction
 
-            # Fix file permissions
+            echo "Fixing file permissions..."
             chown root:root Cropprice.csv predict.py requirements.txt
             chmod 644 Cropprice.csv predict.py requirements.txt
+            chown root:root app.log || true
+            chmod 644 app.log || true
 
-            # Create and activate virtual environment
-            rm -rf venv  # Remove old venv if exists
+            echo "Checking port 5000..."
+            if netstat -tuln | grep :5000; then
+              echo "Port 5000 is in use, killing process..."
+              lsof -i :5000 | grep LISTEN | awk '{print $2}' | xargs kill -9 || true
+            fi
+
+            echo "Setting up virtual environment..."
+            rm -rf venv
             python3 -m venv venv
             source venv/bin/activate
 
-            # Install dependencies inside venv
-            pip install -r requirements.txt
+            echo "Installing dependencies..."
+            pip install --no-cache-dir -r requirements.txt || {
+              echo "Failed to install dependencies"
+              exit 1
+            }
 
-            # Kill old process if running
-            pkill -f 'python predict.py' || true
+            echo "Setting up systemd service..."
+            cat > /etc/systemd/system/crop-prediction.service << 'EOF'
+            [Unit]
+            Description=Crop Prediction Flask App
+            After=network.target
 
-            # Run prediction script with nohup
-            nohup venv/bin/python predict.py > app.log 2>&1 &
+            [Service]
+            Type=simple
+            User=root
+            WorkingDirectory=/root/crop-prediction
+            ExecStart=/root/crop-prediction/venv/bin/python /root/crop-prediction/predict.py
+            Restart=always
+            StandardOutput=append:/root/crop-prediction/app.log
+            StandardError=append:/root/crop-prediction/app.log
+            # Add memory limits to prevent OOM issues during training
+            MemoryLimit=800M
 
-            # Wait briefly and check if the process is running
-            sleep 5
-            if pgrep -f 'python predict.py' > /dev/null; then
-              echo "Flask app started successfully"
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+
+            echo "Reloading systemd and starting service..."
+            systemctl daemon-reload
+            systemctl enable crop-prediction.service
+            systemctl restart crop-prediction.service
+
+            sleep 10
+            if systemctl is-active --quiet crop-prediction.service; then
+              echo "Flask app started successfully via systemd"
             else
-              echo "Failed to start Flask app"
+              echo "Failed to start Flask app via systemd"
+              systemctl status crop-prediction.service
               cat app.log
               exit 1
             fi
 
-            # Verify the app is responding (optional)
             curl --fail --silent --show-error http://localhost:5000/ || {
               echo "Flask app is not responding"
               cat app.log
