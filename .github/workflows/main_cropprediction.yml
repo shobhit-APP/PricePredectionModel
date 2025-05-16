@@ -57,7 +57,7 @@ jobs:
       - name: Deploy to DigitalOcean
         uses: appleboy/scp-action@master
         with:
-          host: 139.59.10.226
+          host: 159.65.158.161
           username: root
           password: ${{ secrets.DROPLET_PASSWORD }}
           source: "Models/,predict.py,requirements.txt"
@@ -66,7 +66,7 @@ jobs:
       - name: Start prediction service
         uses: appleboy/ssh-action@master
         with:
-          host: 139.59.10.226
+          host: 159.65.158.161
           username: root
           password: ${{ secrets.DROPLET_PASSWORD }}
           script: |
