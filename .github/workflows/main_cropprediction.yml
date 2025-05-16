@@ -91,18 +91,30 @@ jobs:
             if netstat -tuln | grep :5000; then
               echo "Port 5000 is in use, killing process..."
               lsof -i :5000 | grep LISTEN | awk '{print $2}' | xargs kill -9 || true
+              sleep 2
             fi
+
+            echo "Checking memory usage..."
+            free -m
+
+            echo "Stopping existing service..."
+            systemctl stop crop-prediction.service || true
 
             echo "Setting up virtual environment..."
             rm -rf venv
             python3 -m venv venv
             source venv/bin/activate
 
-            echo "Installing dependencies..."
-            pip install --no-cache-dir -r requirements.txt || {
-              echo "Failed to install dependencies"
-              exit 1
-            }
+            echo "Installing dependencies with retry..."
+            for i in {1..3}; do
+              pip install --no-cache-dir -r requirements.txt && break
+              echo "pip install failed, retrying ($i/3)..."
+              sleep 5
+              if [ $i -eq 3 ]; then
+                echo "Failed to install dependencies after 3 attempts"
+                exit 1
+              fi
+            done
 
             echo "Setting up systemd service..."
             cat > /etc/systemd/system/crop-prediction.service << 'EOF'
@@ -118,8 +130,7 @@ jobs:
             Restart=always
             StandardOutput=append:/root/crop-prediction/app.log
             StandardError=append:/root/crop-prediction/app.log
-            # Add memory limits to prevent OOM issues during training
-            MemoryLimit=800M
+            MemoryLimit=700M
 
             [Install]
             WantedBy=multi-user.target
@@ -130,18 +141,22 @@ jobs:
             systemctl enable crop-prediction.service
             systemctl restart crop-prediction.service
 
-            sleep 10
+            sleep 15
             if systemctl is-active --quiet crop-prediction.service; then
               echo "Flask app started successfully via systemd"
             else
               echo "Failed to start Flask app via systemd"
               systemctl status crop-prediction.service
+              journalctl -u crop-prediction.service -n 50
               cat app.log
+              free -m
               exit 1
             fi
 
             curl --fail --silent --show-error http://localhost:5000/ || {
               echo "Flask app is not responding"
               cat app.log
+              journalctl -u crop-prediction.service -n 50
+              free -m
               exit 1
             }
