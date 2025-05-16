@@ -36,7 +36,6 @@ os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 # File paths
-file_path = os.path.join(DATA_DIR, 'Cropprice.csv')
 price_minmax_path = os.path.join(MODEL_DIR, 'price_minmax_scaler.pkl')
 price_stand_path = os.path.join(MODEL_DIR, 'price_standard_scaler.pkl')
 xgb_model_path = os.path.join(MODEL_DIR, 'xgb_price_model.pkl')
@@ -44,7 +43,7 @@ nn_model_path = os.path.join(MODEL_DIR, 'nn_price_model.keras')
 
 # Alternate file path if not found
 if not os.path.exists(file_path):
-    alt_file_path = os.path.join(BASE_DIR, 'Cropprice.csv')
+    alt_file_path = os.path.join(DATA_DIR, 'Cropprice.csv')
     if os.path.exists(alt_file_path):
         file_path = alt_file_path
         logger.info(f"Using alternate file path: {file_path}")
