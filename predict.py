@@ -20,10 +20,18 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Path configuration
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Base directory of the current script file
+try:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+except NameError:
+    # __file__ is not defined, fallback to current working directory
+    BASE_DIR = os.getcwd()
+
+# Data and Model directories
 DATA_DIR = os.path.join(BASE_DIR, 'Predict')
 MODEL_DIR = os.path.join(BASE_DIR, 'Models')
+
+# Create directories if they don't exist
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(MODEL_DIR, exist_ok=True)
 
@@ -34,7 +42,7 @@ price_stand_path = os.path.join(MODEL_DIR, 'price_standard_scaler.pkl')
 xgb_model_path = os.path.join(MODEL_DIR, 'xgb_price_model.pkl')
 nn_model_path = os.path.join(MODEL_DIR, 'nn_price_model.keras')
 
-# Check if the dataset exists
+# Alternate file path if not found
 if not os.path.exists(file_path):
     alt_file_path = os.path.join(BASE_DIR, 'Cropprice.csv')
     if os.path.exists(alt_file_path):
