@@ -10,7 +10,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read # Required for actions/checkout
+      contents: read  # Required for actions/checkout
 
     steps:
       - uses: actions/checkout@v4
@@ -24,20 +24,24 @@ jobs:
         run: |
           python -m venv venv
           source venv/bin/activate
+          python --version  # Debug: Confirm Python version
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          source venv/bin/activate
+          pip install -r requirements.txt
 
       - name: Zip artifact for deployment
         run: |
-          zip -r release.zip Models/ Predict/ predict.py requirements.txt
+          zip -r release.zip Models/ Cropprice.csv predict.py requirements.txt
+          ls -l release.zip  # Debug: Confirm zip file creation
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
           name: crop-prediction-app
           path: release.zip
-          if-no-files-found: warn
+          if-no-files-found: error  # Fail if zip file is missing
 
   deploy:
     runs-on: ubuntu-latest
@@ -52,7 +56,9 @@ jobs:
           name: crop-prediction-app
 
       - name: Unzip artifact for deployment
-        run: unzip release.zip
+        run: |
+          unzip release.zip
+          ls -l  # Debug: Confirm unzipped files
 
       - name: Deploy to DigitalOcean
         uses: appleboy/scp-action@v0.1.5
@@ -60,8 +66,9 @@ jobs:
           host: 159.65.158.161
           username: root
           password: ${{ secrets.DROPLET_PASSWORD }}
-          source: "Models/,Predict/,predict.py,requirements.txt"
+          source: "Models/,Cropprice.csv,predict.py,requirements.txt"
           target: "/root/crop-prediction/"
+          strip_components: 0  # Ensure files are copied directly to target
 
       - name: Start prediction service
         uses: appleboy/ssh-action@v0.1.6
@@ -72,7 +79,12 @@ jobs:
           script: |
             cd /root/crop-prediction
 
+            # Fix file permissions
+            chown root:root Cropprice.csv predict.py requirements.txt
+            chmod 644 Cropprice.csv predict.py requirements.txt
+
             # Create and activate virtual environment
+            rm -rf venv  # Remove old venv if exists
             python3 -m venv venv
             source venv/bin/activate
 
@@ -84,3 +96,20 @@ jobs:
 
             # Run prediction script with nohup
             nohup venv/bin/python predict.py > app.log 2>&1 &
+
+            # Wait briefly and check if the process is running
+            sleep 5
+            if pgrep -f 'python predict.py' > /dev/null; then
+              echo "Flask app started successfully"
+            else
+              echo "Failed to start Flask app"
+              cat app.log
+              exit 1
+            fi
+
+            # Verify the app is responding (optional)
+            curl --fail --silent --show-error http://localhost:5000/ || {
+              echo "Flask app is not responding"
+              cat app.log
+              exit 1
+            }
