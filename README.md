@@ -85,6 +85,10 @@ Build PricePredictionModel from the source and install dependencies:
 
 ---
 
+## 📒 Kaggle Notebook
+The complete training notebook (including data preprocessing, model training, and evaluation) is available on Kaggle:  
+🔗 [**View Notebook on Kaggle**](https://www.kaggle.com/code/shobhitsrivastava13/crop-price-predection-model)
+
 ### Usage
 
 Run the project with:
