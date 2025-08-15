@@ -1,4 +1,4 @@
-name: Build and deploy CropPrediction ML models to DigitalOcean Droplet
+name: Build and deploy Crop Recommendation ML model to Azure VM
 
 on:
   push:
@@ -39,7 +39,7 @@ jobs:
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
-          name: crop-prediction-app
+          name: crop-recommendation-app
           path: release.zip
           if-no-files-found: error
 
@@ -53,44 +53,44 @@ jobs:
       - name: Download artifact from build job
         uses: actions/download-artifact@v4
         with:
-          name: crop-prediction-app
+          name: crop-recommendation-app
 
       - name: Unzip artifact for deployment
         run: |
           unzip release.zip
           ls -l
 
-      - name: Deploy to DigitalOcean
+      - name: Deploy to Azure VM
         uses: appleboy/scp-action@v0.1.5
         with:
-          host: 159.65.158.161
-          username: root
-          password: ${{ secrets.DROPLET_PASSWORD }}
+          host: ${{ secrets.AZURE_VM_HOST }}
+          username: ${{ secrets.AZURE_VM_USERNAME }}
+          password: ${{ secrets.AZURE_VM_PASSWORD }}
           source: "Models/,Cropprice.csv,predict.py,requirements.txt"
-          target: "/root/crop-prediction/"
+          target: "/home/${{ secrets.AZURE_VM_USERNAME }}/crop-recommendation/"
           strip_components: 0
 
-      - name: Start prediction service
+      - name: Start recommendation service
         uses: appleboy/ssh-action@v0.1.6
         with:
-          host: 159.65.158.161
-          username: root
-          password: ${{ secrets.DROPLET_PASSWORD }}
+          host: ${{ secrets.AZURE_VM_HOST }}
+          username: ${{ secrets.AZURE_VM_USERNAME }}
+          password: ${{ secrets.AZURE_VM_PASSWORD }}
           script: |
             set -e
 
-            cd /root/crop-prediction
+            cd /home/${{ secrets.AZURE_VM_USERNAME }}/crop-recommendation
 
             echo "Fixing file permissions..."
-            chown root:root Cropprice.csv predict.py requirements.txt
+            sudo chown $USER:$USER Cropprice.csv predict.py requirements.txt
             chmod 644 Cropprice.csv predict.py requirements.txt
-            chown root:root app.log || true
+            sudo chown $USER:$USER app.log || true
             chmod 644 app.log || true
 
-            echo "Checking port 5000..."
-            if netstat -tuln | grep :5000; then
-              echo "Port 5000 is in use, killing process..."
-              lsof -i :5000 | grep LISTEN | awk '{print $2}' | xargs kill -9 || true
+            echo "Checking port 8081..."
+            if sudo netstat -tuln | grep :8081; then
+              echo "Port 8081 is in use, killing process..."
+              sudo lsof -i :8081 | grep LISTEN | awk '{print $2}' | sudo xargs kill -9 || true
               sleep 2
             fi
 
@@ -98,7 +98,7 @@ jobs:
             free -m
 
             echo "Stopping existing service..."
-            systemctl stop crop-prediction.service || true
+            sudo systemctl stop crop-recommendation.service || true
 
             echo "Setting up virtual environment..."
             rm -rf venv
@@ -117,19 +117,20 @@ jobs:
             done
 
             echo "Setting up systemd service..."
-            cat > /etc/systemd/system/crop-prediction.service << 'EOF'
+            sudo tee /etc/systemd/system/crop-recommendation.service > /dev/null << 'EOF'
             [Unit]
-            Description=Crop Prediction Flask App
+            Description=Crop Recommendation Flask App
             After=network.target
 
             [Service]
             Type=simple
-            User=root
-            WorkingDirectory=/root/crop-prediction
-            ExecStart=/root/crop-prediction/venv/bin/python /root/crop-prediction/predict.py
+            User=$USER
+            WorkingDirectory=/home/$USER/crop-recommendation
+            Environment="PORT=8081"
+            ExecStart=/home/$USER/crop-recommendation/venv/bin/python /home/$USER/crop-recommendation/predict.py
             Restart=always
-            StandardOutput=append:/root/crop-prediction/app.log
-            StandardError=append:/root/crop-prediction/app.log
+            StandardOutput=append:/home/$USER/crop-recommendation/app.log
+            StandardError=append:/home/$USER/crop-recommendation/app.log
             MemoryMax=2500M
 
             [Install]
@@ -137,13 +138,13 @@ jobs:
             EOF
 
             echo "Reloading systemd and starting service..."
-            systemctl daemon-reload
-            systemctl enable crop-prediction.service
-            systemctl restart crop-prediction.service
+            sudo systemctl daemon-reload
+            sudo systemctl enable crop-recommendation.service
+            sudo systemctl restart crop-recommendation.service
 
             echo "Waiting for Flask app to start (up to 5 minutes)..."
             for i in {1..30}; do
-              if curl --fail --silent --show-error http://localhost:5000/; then
+              if curl --fail --silent --show-error http://localhost:8081/; then
                 echo "Flask app is responding"
                 break
               fi
@@ -151,20 +152,21 @@ jobs:
               sleep 10
               if [ $i -eq 30 ]; then
                 echo "Flask app failed to start within 5 minutes"
-                systemctl status crop-prediction.service
-                journalctl -u crop-prediction.service -n 50
+                sudo systemctl status crop-recommendation.service
+                sudo journalctl -u crop-recommendation.service -n 50
                 cat app.log
                 free -m
                 exit 1
               fi
             done
 
-            if systemctl is-active --quiet crop-prediction.service; then
+            if sudo systemctl is-active --quiet crop-recommendation.service; then
               echo "Flask app started successfully via systemd"
+              echo "Application is accessible at: http://${{ secrets.AZURE_VM_HOST }}:8081"
             else
               echo "Failed to start Flask app via systemd"
-              systemctl status crop-prediction.service
-              journalctl -u crop-prediction.service -n 50
+              sudo systemctl status crop-recommendation.service
+              sudo journalctl -u crop-recommendation.service -n 50
               cat app.log
               free -m
               exit 1
