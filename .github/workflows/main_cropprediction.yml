@@ -20,7 +20,7 @@ jobs:
         run: |
           ls -la
           ls -la Models/ || echo "Models directory not found"
-          ls -la Predict.py || echo "Predict.py not found"
+          ls -la Predict.py || echo "predict.py not found"
           ls -la requirements.txt || echo "requirements.txt not found"
 
       - name: Set up Python
@@ -41,7 +41,7 @@ jobs:
 
       - name: Zip artifact for deployment
         run: |
-          zip -r release.zip Models/ Predict.py requirements.txt
+          zip -r release.zip Models/ predict.py requirements.txt
           ls -l release.zip
         shell: bash
 
@@ -75,7 +75,7 @@ jobs:
           host: ${{ secrets.AZURE_VM_HOST }}
           username: ${{ secrets.AZURE_VM_USERNAME }}
           password: ${{ secrets.AZURE_VM_PASSWORD }}
-          source: "Models/,Predict.py,requirements.txt"
+          source: "Models/,predict.py,requirements.txt"
           target: "/home/${{ secrets.AZURE_VM_USERNAME }}/crop-prediction/"
           strip_components: 0
 
@@ -89,8 +89,8 @@ jobs:
             set -e
             cd /home/${{ secrets.AZURE_VM_USERNAME }}/crop-prediction
 
-            sudo chown $USER:$USER Predict.py requirements.txt
-            chmod 644 Predict.py requirements.txt
+            sudo chown $USER:$USER predict.py requirements.txt
+            chmod 644 predict.py requirements.txt
             sudo chown $USER:$USER app.log || true
             chmod 644 app.log || true
 
@@ -133,3 +133,4 @@ jobs:
             sudo systemctl daemon-reload
             sudo systemctl enable crop-prediction.service
             sudo systemctl restart crop-prediction.service
+
