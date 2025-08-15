@@ -20,7 +20,7 @@ jobs:
         run: |
           ls -la
           ls -la Models/ || echo "Models directory not found"
-          ls -la Predict.py || echo "predict.py not found"
+          ls -la predict.py || echo "predict.py not found"
           ls -la requirements.txt || echo "requirements.txt not found"
 
       - name: Set up Python
@@ -120,7 +120,7 @@ jobs:
             User=$USER
             WorkingDirectory=/home/$USER/crop-prediction
             Environment="PORT=8081"
-            ExecStart=/home/$USER/crop-prediction/venv/bin/python /home/$USER/crop-prediction/Predict.py
+            ExecStart=/home/$USER/crop-prediction/venv/bin/python /home/$USER/crop-prediction/predict.py
             Restart=always
             StandardOutput=append:/home/$USER/crop-prediction/app.log
             StandardError=append:/home/$USER/crop-prediction/app.log
@@ -133,4 +133,5 @@ jobs:
             sudo systemctl daemon-reload
             sudo systemctl enable crop-prediction.service
             sudo systemctl restart crop-prediction.service
+
 
