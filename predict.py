@@ -23,7 +23,10 @@ logger = logging.getLogger(__name__)
 # Path configuration
 
 # Directories
-BASE_DIR = '/root/crop-prediction'
+import os
+
+# Directories
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # jis folder me script hai
 MODEL_DIR = os.path.join(BASE_DIR, 'Models')
 
 # Create directories
@@ -306,6 +309,6 @@ def predict():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 8081))
     logger.info(f"Starting server on port {port}")
     app.run(host="0.0.0.0", port=port, debug=True)
